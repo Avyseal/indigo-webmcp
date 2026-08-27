@@ -1,10 +1,12 @@
 import type {
 	IndigoWebMcpCapability,
-	IndigoWebMcpContext,
 	IndigoWebMcpProjection,
-	IndigoWebMcpSurfaceName,
 } from "./projection.js";
-import type { WebMcpJsonValue } from "./tool-contract.js";
+import type {
+	WebMcpJsonObject,
+	WebMcpJsonValue,
+	WebMcpToolAnnotations,
+} from "./tool-contract.js";
 
 export class IndigoWebMcpProjectionParseError extends Error {
 	readonly path: string;
@@ -23,6 +25,19 @@ function asRecord(value: unknown, path: string): Record<string, unknown> {
 	return value as Record<string, unknown>;
 }
 
+function assertAllowedKeys(
+	record: Record<string, unknown>,
+	allowed: readonly string[],
+	path: string,
+): void {
+	const allowedSet = new Set(allowed);
+	for (const key of Object.keys(record)) {
+		if (!allowedSet.has(key)) {
+			throw new IndigoWebMcpProjectionParseError(`${path}.${key}`);
+		}
+	}
+}
+
 function requireString(value: unknown, path: string): string {
 	if (typeof value !== "string" || value.trim().length === 0) {
 		throw new IndigoWebMcpProjectionParseError(path);
@@ -30,28 +45,11 @@ function requireString(value: unknown, path: string): string {
 	return value.trim();
 }
 
-function optionalString(
-	value: unknown,
-	path: string,
-): string | null | undefined {
-	if (value === undefined) {
-		return undefined;
-	}
-	if (value === null) {
-		return null;
-	}
-	if (typeof value !== "string") {
-		throw new IndigoWebMcpProjectionParseError(path);
-	}
+function optionalString(value: unknown, path: string): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "string") throw new IndigoWebMcpProjectionParseError(path);
 	const normalized = value.trim();
-	return normalized.length === 0 ? null : normalized;
-}
-
-function requireBoolean(value: unknown, path: string): boolean {
-	if (typeof value !== "boolean") {
-		throw new IndigoWebMcpProjectionParseError(path);
-	}
-	return value;
+	return normalized.length > 0 ? normalized : undefined;
 }
 
 function requireJsonValue(value: unknown, path: string): WebMcpJsonValue {
@@ -69,9 +67,8 @@ function requireJsonValue(value: unknown, path: string): WebMcpJsonValue {
 		);
 	}
 	if (typeof value === "object") {
-		const record = value as Record<string, unknown>;
 		const parsed: Record<string, WebMcpJsonValue> = {};
-		for (const [key, item] of Object.entries(record)) {
+		for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
 			parsed[key] = requireJsonValue(item, `${path}.${key}`);
 		}
 		return parsed;
@@ -79,88 +76,66 @@ function requireJsonValue(value: unknown, path: string): WebMcpJsonValue {
 	throw new IndigoWebMcpProjectionParseError(path);
 }
 
-function parseSurface(value: unknown): IndigoWebMcpSurfaceName {
-	if (value === "admin" || value === "public") {
-		return value;
+function requireJsonObject(value: unknown, path: string): WebMcpJsonObject {
+	const parsed = requireJsonValue(value, path);
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new IndigoWebMcpProjectionParseError(path);
 	}
-	throw new IndigoWebMcpProjectionParseError("context.surface");
+	return parsed as WebMcpJsonObject;
 }
 
-function parseContext(value: unknown): IndigoWebMcpContext {
-	const context = asRecord(value, "context");
-	const tenantId = optionalString(context["tenant_id"], "context.tenant_id");
-	const branchId = optionalString(context["branch_id"], "context.branch_id");
-	const route = optionalString(context["route"], "context.route");
-	const module = optionalString(context["module"], "context.module");
-
-	return {
-		surface: parseSurface(context["surface"]),
-		tenantId: tenantId ?? null,
-		branchId: branchId ?? null,
-		...(route !== undefined ? { route } : {}),
-		...(module !== undefined ? { module } : {}),
-	};
-}
-
-function parseCapability(
+function parseAnnotations(
 	value: unknown,
-	index: number,
-): IndigoWebMcpCapability {
-	const path = `capabilities[${index}]`;
-	const capability = asRecord(value, path);
-	const title = optionalString(capability["title"], `${path}.title`);
-	const untrustedContentHint = capability["untrusted_content_hint"];
-
+	path: string,
+): WebMcpToolAnnotations | undefined {
+	if (value === undefined) return undefined;
+	const annotations = asRecord(value, path);
+	assertAllowedKeys(annotations, ["readOnlyHint", "untrustedContentHint"], path);
+	const readOnlyHint = annotations["readOnlyHint"];
+	const untrustedContentHint = annotations["untrustedContentHint"];
+	if (readOnlyHint !== undefined && typeof readOnlyHint !== "boolean") {
+		throw new IndigoWebMcpProjectionParseError(`${path}.readOnlyHint`);
+	}
 	if (
 		untrustedContentHint !== undefined &&
 		typeof untrustedContentHint !== "boolean"
 	) {
-		throw new IndigoWebMcpProjectionParseError(
-			`${path}.untrusted_content_hint`,
-		);
+		throw new IndigoWebMcpProjectionParseError(`${path}.untrustedContentHint`);
 	}
+	return {
+		...(typeof readOnlyHint === "boolean" ? { readOnlyHint } : {}),
+		...(typeof untrustedContentHint === "boolean"
+			? { untrustedContentHint }
+			: {}),
+	};
+}
+
+function parseCapability(value: unknown, index: number): IndigoWebMcpCapability {
+	const path = `capabilities[${index}]`;
+	const capability = asRecord(value, path);
+	assertAllowedKeys(
+		capability,
+		["name", "title", "description", "inputSchema", "annotations", "metadata"],
+		path,
+	);
+	const title = optionalString(capability["title"], `${path}.title`);
+	const inputSchema = capability["inputSchema"];
+	const annotations = parseAnnotations(
+		capability["annotations"],
+		`${path}.annotations`,
+	);
+	const metadata = capability["metadata"];
 
 	return {
 		name: requireString(capability["name"], `${path}.name`),
-		...(title !== undefined && title !== null ? { title } : {}),
-		description: requireString(
-			capability["description"],
-			`${path}.description`,
-		),
-		inputSchema: requireJsonValue(
-			capability["input_schema"],
-			`${path}.input_schema`,
-		),
-		toolVersion: requireString(
-			capability["tool_version"],
-			`${path}.tool_version`,
-		),
-		ownerDomain: requireString(
-			capability["owner_domain"],
-			`${path}.owner_domain`,
-		),
-		riskLevel: requireString(
-			capability["risk_level"],
-			`${path}.risk_level`,
-		),
-		requiresConfirmation: requireBoolean(
-			capability["requires_confirmation"],
-			`${path}.requires_confirmation`,
-		),
-		requiresOwner: requireBoolean(
-			capability["requires_owner"],
-			`${path}.requires_owner`,
-		),
-		requiresLock: requireBoolean(
-			capability["requires_lock"],
-			`${path}.requires_lock`,
-		),
-		sideEffect: requireBoolean(
-			capability["side_effect"],
-			`${path}.side_effect`,
-		),
-		...(typeof untrustedContentHint === "boolean"
-			? { untrustedContentHint }
+		...(title !== undefined ? { title } : {}),
+		description: requireString(capability["description"], `${path}.description`),
+		...(inputSchema !== undefined
+			? { inputSchema: requireJsonObject(inputSchema, `${path}.inputSchema`) }
+			: {}),
+		...(annotations !== undefined ? { annotations } : {}),
+		...(metadata !== undefined
+			? { metadata: requireJsonObject(metadata, `${path}.metadata`) }
 			: {}),
 	};
 }
@@ -169,6 +144,11 @@ export function parseIndigoWebMcpProjection(
 	value: unknown,
 ): IndigoWebMcpProjection {
 	const projection = asRecord(value, "projection");
+	assertAllowedKeys(
+		projection,
+		["revision", "context", "capabilities"],
+		"projection",
+	);
 	const capabilities = projection["capabilities"];
 	if (!Array.isArray(capabilities)) {
 		throw new IndigoWebMcpProjectionParseError("capabilities");
@@ -176,7 +156,7 @@ export function parseIndigoWebMcpProjection(
 
 	return {
 		revision: requireString(projection["revision"], "revision"),
-		context: parseContext(projection["context"]),
+		context: requireJsonObject(projection["context"], "context"),
 		capabilities: capabilities.map(parseCapability),
 	};
 }

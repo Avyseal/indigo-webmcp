@@ -4,7 +4,10 @@ import {
 	WebMcpRegistrationError,
 	type WebMcpToolSetRegistration,
 } from "./tool-contract.js";
-import { preflightWebMcpTools } from "./tool-validation.js";
+import {
+	assertWebMcpToolResultSerializable,
+	preflightWebMcpTools,
+} from "./tool-validation.js";
 
 function isObjectLike(value: unknown): value is object {
 	return (
@@ -31,9 +34,7 @@ function connectExternalLifecycle(
 	controller: AbortController,
 	externalSignal: AbortSignal | undefined,
 ): void {
-	if (!externalSignal) {
-		return;
-	}
+	if (!externalSignal) return;
 
 	if (externalSignal.aborted) {
 		controller.abort(externalSignal.reason);
@@ -57,12 +58,10 @@ function createRegistration(
 	return {
 		toolNames: Object.freeze([...toolNames]),
 		signal: controller.signal,
-		dispose() {
-			if (disposed) {
-				return;
-			}
+		dispose(reason) {
+			if (disposed) return;
 			disposed = true;
-			controller.abort();
+			controller.abort(reason);
 		},
 	};
 }
@@ -74,12 +73,13 @@ export async function registerWebMcpToolSet(
 
 	const controller = new AbortController();
 	connectExternalLifecycle(controller, options.signal);
-	const toolNames = options.tools.map((tool) => tool.name);
-	const registration = createRegistration(controller, toolNames);
+	const registration = createRegistration(
+		controller,
+		options.tools.map((tool) => tool.name),
+	);
 
-	if (options.tools.length === 0 || controller.signal.aborted) {
-		return registration;
-	}
+	if (controller.signal.aborted) throw controller.signal.reason;
+	if (options.tools.length === 0) return registration;
 
 	if (!hasWebMcpModelContext(options.document)) {
 		throw new WebMcpRegistrationError("webmcp_unavailable");
@@ -93,10 +93,6 @@ export async function registerWebMcpToolSet(
 	};
 
 	for (const tool of options.tools) {
-		if (controller.signal.aborted) {
-			break;
-		}
-
 		try {
 			await options.document.modelContext.registerTool(
 				{
@@ -109,19 +105,20 @@ export async function registerWebMcpToolSet(
 					...(tool.annotations !== undefined
 						? { annotations: { ...tool.annotations } }
 						: {}),
-					execute: async (input: unknown, executionOptions?: unknown) =>
-						options.execute({
+					execute: async (input: unknown, executionOptions?: unknown) => {
+						const result = await options.execute({
 							toolName: tool.name,
 							input,
 							signal: resolveExecutionSignal(executionOptions),
-						}),
+						});
+						assertWebMcpToolResultSerializable(result, tool.name);
+						return result;
+					},
 				},
 				registrationOptions,
 			);
 		} catch (error) {
-			if (controller.signal.aborted) {
-				return registration;
-			}
+			if (controller.signal.aborted) throw controller.signal.reason;
 			controller.abort(error);
 			throw new WebMcpRegistrationError("webmcp_tool_registration_failed", {
 				toolName: tool.name,

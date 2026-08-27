@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Indigo WebMCP Interoperability Lab</title>
+		<link rel="stylesheet" href="./styles.css" />
+	</head>
+	<body>
+		<main>
+			<header>
+				<p class="eyebrow">INDIGO WEBMCP</p>
+				<h1>Interoperability Lab</h1>
+				<p class="lede">
+					A runnable browser surface where humans and WebMCP agents operate on
+					the same inventory state.
+				</p>
+				<div class="status-row">
+					<span id="webmcp-status" class="status">Detecting WebMCP…</span>
+					<span id="view-status" class="status">View: catalog</span>
+				</div>
+			</header>
+
+			<section class="toolbar" aria-label="Lab views">
+				<button type="button" data-view="catalog" class="active">Catalog</button>
+				<button type="button" data-view="inventory">Inventory</button>
+			</section>
+
+			<section class="panel">
+				<div class="panel-heading">
+					<div>
+						<h2>Shared inventory</h2>
+						<p>Changes made by a human or a WebMCP tool update this same state.</p>
+					</div>
+					<button id="reset" type="button">Reset lab</button>
+				</div>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Product</th>
+								<th>Stock</th>
+								<th>Reorder level</th>
+								<th>Human action</th>
+							</tr>
+						</thead>
+						<tbody id="inventory-body"></tbody>
+					</table>
+				</div>
+			</section>
+
+			<section class="panel compact">
+				<h2>Agent flow</h2>
+				<ol>
+					<li>
+						Invoke <code>indigo.capabilities.discover</code> with an optional intent
+						query.
+					</li>
+					<li>The lab registers only the contextual tools relevant to that intent.</li>
+					<li>
+						Invoke a discovered tool. Read and mutation tools operate on the same
+						state shown above.
+					</li>
+				</ol>
+				<pre id="event-log" aria-live="polite">Lab ready.</pre>
+			</section>
+		</main>
+		<script type="module" src="./app.js"></script>
+	</body>
+</html>

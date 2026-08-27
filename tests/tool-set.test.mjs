@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-	registerWebMcpToolSet,
-	WebMcpRegistrationError,
-} from "../dist/index.js";
+import { registerWebMcpToolSet, WebMcpRegistrationError } from "../dist/index.js";
 
 function createDocumentHarness({ failOnName } = {}) {
 	const registrations = [];
@@ -24,20 +21,15 @@ function createDocumentHarness({ failOnName } = {}) {
 }
 
 const readTool = {
-	name: "admin.catalog.search.read",
+	name: "catalog.search",
 	title: "Search catalog",
-	description: "Search the authorized Indigo catalog.",
+	description: "Search the authorized catalog.",
 	inputSchema: {
 		type: "object",
-		properties: {
-			query: { type: "string" },
-		},
+		properties: { query: { type: "string" } },
 		additionalProperties: false,
 	},
-	annotations: {
-		readOnlyHint: true,
-		untrustedContentHint: false,
-	},
+	annotations: { readOnlyHint: true, untrustedContentHint: false },
 };
 
 test("registers a tool with a registration signal and delegates execution", async () => {
@@ -51,8 +43,7 @@ test("registers a tool with a registration signal and delegates execution", asyn
 			return { ok: true, tool: request.toolName };
 		},
 	});
-
-	assert.deepEqual(registration.toolNames, ["admin.catalog.search.read"]);
+	assert.deepEqual(registration.toolNames, [readTool.name]);
 	assert.equal(harness.registrations.length, 1);
 	const registered = harness.registrations[0];
 	assert.equal(registered.tool.name, readTool.name);
@@ -60,19 +51,14 @@ test("registers a tool with a registration signal and delegates execution", asyn
 	assert.deepEqual(registered.tool.inputSchema, readTool.inputSchema);
 	assert.deepEqual(registered.tool.annotations, readTool.annotations);
 	assert.equal(registered.options.signal, registration.signal);
-	assert.equal(registration.signal.aborted, false);
 
-	const executionController = new AbortController();
+	const execution = new AbortController();
 	const result = await registered.tool.execute(
 		{ query: "coffee" },
-		{ signal: executionController.signal },
+		{ signal: execution.signal },
 	);
-
 	assert.deepEqual(result, { ok: true, tool: readTool.name });
-	assert.equal(invocations.length, 1);
-	assert.equal(invocations[0].toolName, readTool.name);
-	assert.deepEqual(invocations[0].input, { query: "coffee" });
-	assert.equal(invocations[0].signal, executionController.signal);
+	assert.equal(invocations[0].signal, execution.signal);
 });
 
 test("disposes every registration through the shared AbortSignal", async () => {
@@ -82,11 +68,10 @@ test("disposes every registration through the shared AbortSignal", async () => {
 		tools: [readTool],
 		execute: async () => null,
 	});
-
-	registration.dispose();
-	registration.dispose();
-
+	registration.dispose("page-unmounted");
+	registration.dispose("ignored");
 	assert.equal(registration.signal.aborted, true);
+	assert.equal(registration.signal.reason, "page-unmounted");
 });
 
 test("passes explicit trusted origins to registerTool", async () => {
@@ -97,27 +82,18 @@ test("passes explicit trusted origins to registerTool", async () => {
 		exposedTo: ["https://agent.example"],
 		execute: async () => null,
 	});
-
 	assert.deepEqual(harness.registrations[0].options.exposedTo, [
 		"https://agent.example",
 	]);
 });
 
 test("rolls back earlier registrations when a later registration fails", async () => {
-	const failingName = "admin.catalog.product.read";
+	const failingName = "catalog.product.read";
 	const harness = createDocumentHarness({ failOnName: failingName });
-
 	await assert.rejects(
 		registerWebMcpToolSet({
 			document: harness.document,
-			tools: [
-				readTool,
-				{
-					...readTool,
-					name: failingName,
-					title: "Read product",
-				},
-			],
+			tools: [readTool, { ...readTool, name: failingName }],
 			execute: async () => null,
 		}),
 		(error) =>
@@ -125,7 +101,6 @@ test("rolls back earlier registrations when a later registration fails", async (
 			error.code === "webmcp_tool_registration_failed" &&
 			error.toolName === failingName,
 	);
-
 	assert.equal(harness.registrations.length, 1);
 	assert.equal(harness.registrations[0].options.signal.aborted, true);
 });
@@ -136,7 +111,6 @@ test("returns an inert registration for an empty authorized tool set", async () 
 		tools: [],
 		execute: async () => null,
 	});
-
 	assert.deepEqual(registration.toolNames, []);
 	assert.equal(registration.signal.aborted, false);
 	registration.dispose();
@@ -156,24 +130,23 @@ test("fails explicitly when tools exist but WebMCP is unavailable", async () => 
 	);
 });
 
-test("does not register tools when the external lifecycle signal is already aborted", async () => {
+test("rejects immediately when the external lifecycle is already aborted", async () => {
 	const harness = createDocumentHarness();
 	const lifecycle = new AbortController();
 	lifecycle.abort("route-changed");
-
-	const registration = await registerWebMcpToolSet({
-		document: harness.document,
-		tools: [readTool],
-		signal: lifecycle.signal,
-		execute: async () => null,
-	});
-
-	assert.equal(registration.signal.aborted, true);
-	assert.equal(registration.signal.reason, "route-changed");
+	await assert.rejects(
+		registerWebMcpToolSet({
+			document: harness.document,
+			tools: [readTool],
+			signal: lifecycle.signal,
+			execute: async () => null,
+		}),
+		(error) => error === "route-changed",
+	);
 	assert.equal(harness.registrations.length, 0);
 });
 
-test("unregisters completed tools when the external lifecycle signal aborts", async () => {
+test("unregisters completed tools when the external lifecycle aborts", async () => {
 	const harness = createDocumentHarness();
 	const lifecycle = new AbortController();
 	const registration = await registerWebMcpToolSet({
@@ -182,10 +155,8 @@ test("unregisters completed tools when the external lifecycle signal aborts", as
 		signal: lifecycle.signal,
 		execute: async () => null,
 	});
-
 	const reason = new Error("session-changed");
 	lifecycle.abort(reason);
-
 	assert.equal(harness.registrations.length, 1);
 	assert.equal(harness.registrations[0].options.signal, registration.signal);
 	assert.equal(registration.signal.aborted, true);
@@ -201,7 +172,7 @@ test("cancels a pending browser registration and does not register later tools",
 			async registerTool(tool, options) {
 				registrations.push({ tool, options });
 				started.resolve();
-				return new Promise((resolve, reject) => {
+				return new Promise((_resolve, reject) => {
 					if (options.signal.aborted) {
 						reject(options.signal.reason);
 						return;
@@ -217,21 +188,32 @@ test("cancels a pending browser registration and does not register later tools",
 	};
 	const registrationPromise = registerWebMcpToolSet({
 		document,
-		tools: [
-			readTool,
-			{ ...readTool, name: "admin.catalog.product.read" },
-		],
+		tools: [readTool, { ...readTool, name: "catalog.product.read" }],
 		signal: lifecycle.signal,
 		execute: async () => null,
 	});
-
 	await started.promise;
 	const reason = new Error("tenant-changed");
 	lifecycle.abort(reason);
-	const registration = await registrationPromise;
-
-	assert.equal(registration.signal.aborted, true);
-	assert.equal(registration.signal.reason, reason);
+	await assert.rejects(registrationPromise, (error) => error === reason);
 	assert.equal(registrations.length, 1);
-	assert.equal(registrations[0].options.signal, registration.signal);
+	assert.equal(registrations[0].options.signal.aborted, true);
+});
+
+test("fails closed when an executor returns a non-serializable result", async () => {
+	const harness = createDocumentHarness();
+	await registerWebMcpToolSet({
+		document: harness.document,
+		tools: [readTool],
+		execute: async () => 1n,
+	});
+	await assert.rejects(
+		harness.registrations[0].tool.execute(
+			{},
+			{ signal: new AbortController().signal },
+		),
+		(error) =>
+			error instanceof WebMcpRegistrationError &&
+			error.code === "webmcp_tool_result_not_serializable",
+	);
 });

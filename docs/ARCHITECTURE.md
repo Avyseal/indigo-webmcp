@@ -2,78 +2,76 @@
 
 ## Purpose
 
-Indigo WebMCP is a browser interoperability layer. It makes selected, authorized Indigo capabilities discoverable to WebMCP-compatible agents without turning the browser adapter into a second business-logic or authorization system.
+Indigo WebMCP is a browser interoperability layer. It exposes host-approved capabilities to WebMCP-compatible agents without becoming a second business-logic, transport, or authorization system.
 
 ## Ownership
 
 ```text
-External agent
-    |
-    v
+External / browser agent
+        |
+        v
 WebMCP browser API
-    |
-    v
-indigo-webmcp                 public repository
-    |                          - API feature detection
-    |                          - registration lifecycle
-    |                          - neutral capability contracts
-    |                          - validation and tests
-    v
-Indigo authenticated API      private product boundary
-    |
-    v
-Indigo canonical tool layer   source of truth
-    |
-    v
-Domain handlers/services
+        |
+        v
+indigo-webmcp
+  - feature detection
+  - tool validation
+  - registration lifecycle
+  - contextual projection
+  - on-demand discovery
+  - cancellation propagation
+        |
+        v
+host callbacks
+  - discover authorized capabilities
+  - execute canonical operations
+        |
+        v
+application authority
 ```
 
-## Canonical rules
+The host can be Indigo or any reference/testing host. This repository does not require private Indigo source to build, test, or understand the adapter.
 
-The public adapter must consume explicit capability projections from Indigo. It must not reconstruct permissions from UI state, duplicate backend tool registries, or import Avery-specific presentation metadata as authority.
+## Native WebMCP mapping
 
-Avery and WebMCP are sibling consumers of Indigo capabilities. Neither owns the underlying business tools.
+`registerWebMcpToolSet()` maps `WebMcpToolDefinition` objects directly to `document.modelContext.registerTool()`.
 
-## Runtime model
+A shared registration `AbortController` owns the lifetime of a set. Aborting that controller unregisters the set through the native WebMCP registration signal. Each browser invocation supplies a separate execution `AbortSignal`, which is forwarded to the host executor.
 
-Registration is client-side and cheap. Loading a page may register tool metadata, but it must not execute business operations or wake backend compute merely because WebMCP support exists.
+The adapter validates tool names, non-empty descriptions, serializable schemas, and serializable execution results before allowing silent browser serialization failures.
 
-Backend work starts only when an agent invokes a tool and the adapter performs the corresponding authenticated request.
+## Contextual projection
 
-## Contextual exposure
+`createIndigoWebMcpSurface()` accepts a projection containing:
 
-The final Indigo integration will expose only tools valid for the current authenticated context. Relevant inputs include the active surface, route/module, tenant, branch, permissions, and server-projected capability policy.
+- an opaque revision;
+- arbitrary JSON context;
+- browser-facing capabilities.
 
-The browser may reduce the visible tool set for usability, but the backend remains the final enforcement point.
+Synchronizing a new projection aborts the prior projection and replaces its complete tool set. If a projection is superseded while registration is pending, the obsolete registration is rolled back.
 
-## Side effects
+The context is passed back to the executor but is never interpreted as authorization.
 
-Read operations can execute directly when server policy permits. Mutations must preserve Indigo's existing confirmation, ownership, lock, rate-limit, idempotency, and audit requirements.
+## On-demand discovery
 
-## Failure behavior
+`createIndigoWebMcpDiscoverySurface()` initially registers only `indigo.capabilities.discover`. Registering that tool performs no backend or business work.
 
-If `document.modelContext` or `registerTool` is unavailable, Indigo must continue working normally with no WebMCP behavior. WebMCP is progressive enhancement, not a boot dependency for the admin or storefront.
+When an agent invokes discovery, the adapter passes the current host context, optional natural-language intent query, and execution signal to `loadProjection`. The resulting capabilities are then registered as a contextual set.
 
-If a tool becomes invalid because route, tenant, branch, permissions, or session state changes, its registration must be removed or replaced before further use.
+This pattern avoids eagerly projecting a large tool catalog and allows scale-to-zero hosts to defer work until an agent actually requests capabilities.
 
-## Repository boundary
+## Progressive enhancement
 
-This repository must remain independently understandable, testable, and open source. It must never require disclosure of Indigo's private core to explain how the WebMCP adapter works.
+If `document.modelContext.registerTool` is unavailable, the surface returns `unsupported`; the host application continues normally.
 
-## Browser registration lifecycle
+An empty authorized projection is also valid and registers no business tools.
 
-`registerWebMcpToolSet` owns only browser registration. The Indigo host passes an already-authorized tool set plus an execution callback that uses Indigo's existing authenticated transport.
+## Cross-origin tools
 
-The registration layer:
+`exposedTo` is optional and forwarded to the native registration API. The browser remains authoritative for trustworthy-origin and Permissions Policy enforcement.
 
-- validates every tool before the first browser registration;
-- enforces the WebMCP tool-name grammar (`1..128`, ASCII alphanumeric plus `_`, `-`, `.`);
-- registers through `document.modelContext.registerTool()`;
-- owns registrations with one `AbortController` and unregisters them on disposal;
-- can bind registration ownership to a caller `AbortSignal`, so route/session/context teardown cancels pending registration and unregisters completed tools;
-- rolls back earlier registrations if a later registration fails;
-- forwards the agent-provided execution `AbortSignal` to the host executor;
-- does not make HTTP requests, resolve permissions, or bypass server confirmation policy;
-- treats an empty authorized tool set as a valid no-op for progressive enhancement.
+## Security boundary
 
-Cross-origin exposure is opt-in through `exposedTo`; same-origin/browser-agent exposure remains the default.
+Annotations such as `readOnlyHint` and `untrustedContentHint` are agent/browser hints. They are not access control.
+
+The host must revalidate authentication, authorization, context, confirmation, locks, rate limits, idempotency, and audit requirements at execution time.

@@ -4,20 +4,17 @@ import {
 	type IndigoWebMcpExecutor,
 	type IndigoWebMcpSurface,
 } from "./surface.js";
+import type { WebMcpJsonObject } from "./tool-contract.js";
 import { WebMcpRegistrationError } from "./tool-contract.js";
 import { registerWebMcpToolSet } from "./tool-set.js";
 
 export const INDIGO_WEBMCP_DISCOVERY_TOOL_NAME = "indigo.capabilities.discover";
-export const INDIGO_WEBMCP_CONFIRM_TOOL_NAME = "indigo.action.confirm";
 
-export interface IndigoWebMcpDiscoveryContext {
-	readonly route?: string | null;
-	readonly module?: string | null;
-	readonly toolPrefixes?: readonly string[];
-}
+export type IndigoWebMcpDiscoveryContext = WebMcpJsonObject;
 
 export interface IndigoWebMcpProjectionLoadRequest {
 	readonly context: IndigoWebMcpDiscoveryContext;
+	readonly input: WebMcpJsonObject;
 	readonly signal: AbortSignal;
 }
 
@@ -25,21 +22,11 @@ export type IndigoWebMcpProjectionLoader = (
 	request: IndigoWebMcpProjectionLoadRequest,
 ) => Promise<IndigoWebMcpProjection>;
 
-export interface IndigoWebMcpApprovalConfirmationRequest {
-	readonly proposalId: string;
-	readonly signal: AbortSignal;
-}
-
-export type IndigoWebMcpApprovalConfirmer = (
-	request: IndigoWebMcpApprovalConfirmationRequest,
-) => unknown | Promise<unknown>;
-
 export interface CreateIndigoWebMcpDiscoverySurfaceOptions {
 	readonly document: unknown;
 	readonly getContext: () => IndigoWebMcpDiscoveryContext;
 	readonly loadProjection: IndigoWebMcpProjectionLoader;
 	readonly execute: IndigoWebMcpExecutor;
-	readonly confirmApproval?: IndigoWebMcpApprovalConfirmer;
 	readonly exposedTo?: readonly string[];
 }
 
@@ -52,22 +39,21 @@ export interface IndigoWebMcpDiscoverySurface {
 }
 
 function createUnsupportedDiscoverySurface(): IndigoWebMcpDiscoverySurface {
-	return {
-		status: "unsupported",
-		invalidate() {},
-		dispose() {},
-	};
+	return { status: "unsupported", invalidate() {}, dispose() {} };
 }
 
-function readProposalId(input: unknown): string {
-	if (typeof input !== "object" || input === null || Array.isArray(input)) {
-		throw new Error("indigo_webmcp_confirmation_input_invalid");
+function parseDiscoveryInput(input: unknown): WebMcpJsonObject {
+	if (input === undefined || input === null) return {};
+	if (typeof input !== "object" || Array.isArray(input)) {
+		throw new Error("indigo_webmcp_discovery_input_invalid");
 	}
-	const proposalId = Reflect.get(input, "proposal_id");
-	if (typeof proposalId !== "string" || proposalId.trim().length === 0) {
-		throw new Error("indigo_webmcp_confirmation_proposal_id_required");
+	const query = Reflect.get(input, "query");
+	if (query !== undefined && typeof query !== "string") {
+		throw new Error("indigo_webmcp_discovery_query_invalid");
 	}
-	return proposalId.trim();
+	return typeof query === "string" && query.trim().length > 0
+		? { query: query.trim() }
+		: {};
 }
 
 export async function createIndigoWebMcpDiscoverySurface(
@@ -79,67 +65,38 @@ export async function createIndigoWebMcpDiscoverySurface(
 		...(options.exposedTo !== undefined ? { exposedTo: options.exposedTo } : {}),
 	});
 	const lifecycle = new AbortController();
-	const fixedTools = [
-		{
-			name: INDIGO_WEBMCP_DISCOVERY_TOOL_NAME,
-			title: "Discover Indigo capabilities",
-			description:
-				"Load the Indigo tools currently available for the active page and authenticated business context.",
-			inputSchema: {
-				type: "object",
-				properties: {},
-				additionalProperties: false,
-			},
-			annotations: {
-				readOnlyHint: true,
-				untrustedContentHint: false,
-			},
-		},
-		...(options.confirmApproval === undefined
-			? []
-			: [
-					{
-						name: INDIGO_WEBMCP_CONFIRM_TOOL_NAME,
-						title: "Confirm Indigo action",
-						description:
-							"Confirm and execute an Indigo proposal only after the user explicitly approves the proposal returned by a previous Indigo tool call.",
-						inputSchema: {
-							type: "object",
-							properties: {
-								proposal_id: { type: "string" },
-							},
-							required: ["proposal_id"],
-							additionalProperties: false,
-						},
-						annotations: {
-							readOnlyHint: false,
-							untrustedContentHint: false,
-						},
-					},
-				]),
-	] as const;
 
 	try {
 		const discoveryRegistration = await registerWebMcpToolSet({
 			document: options.document,
-			tools: fixedTools,
+			tools: [
+				{
+					name: INDIGO_WEBMCP_DISCOVERY_TOOL_NAME,
+					title: "Discover Indigo capabilities",
+					description:
+						"Discover and register the Indigo capabilities relevant to the current page and agent intent. Invoke this before using contextual Indigo tools.",
+					inputSchema: {
+						type: "object",
+						properties: {
+							query: {
+								type: "string",
+								description:
+									"Optional natural-language description of the capability needed.",
+							},
+						},
+						additionalProperties: false,
+					},
+					annotations: { readOnlyHint: true, untrustedContentHint: false },
+				},
+			],
 			...(options.exposedTo !== undefined
 				? { exposedTo: options.exposedTo }
 				: {}),
 			signal: lifecycle.signal,
 			execute: async (request) => {
-				if (request.toolName === INDIGO_WEBMCP_CONFIRM_TOOL_NAME) {
-					if (options.confirmApproval === undefined) {
-						throw new Error("indigo_webmcp_confirmation_unavailable");
-					}
-					return options.confirmApproval({
-						proposalId: readProposalId(request.input),
-						signal: request.signal,
-					});
-				}
-
 				const projection = await options.loadProjection({
 					context: options.getContext(),
+					input: parseDiscoveryInput(request.input),
 					signal: request.signal,
 				});
 				const result = await businessSurface.sync(projection);
@@ -159,10 +116,8 @@ export async function createIndigoWebMcpDiscoverySurface(
 			dispose(reason) {
 				const disposalReason = reason ?? "discovery-surface-disposed";
 				businessSurface.dispose(disposalReason);
-				discoveryRegistration.dispose();
-				if (!lifecycle.signal.aborted) {
-					lifecycle.abort(disposalReason);
-				}
+				discoveryRegistration.dispose(disposalReason);
+				if (!lifecycle.signal.aborted) lifecycle.abort(disposalReason);
 			},
 		};
 	} catch (error) {

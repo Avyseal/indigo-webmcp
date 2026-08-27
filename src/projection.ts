@@ -1,31 +1,18 @@
 import type {
-	WebMcpJsonValue,
+	WebMcpJsonObject,
+	WebMcpToolAnnotations,
 	WebMcpToolDefinition,
 } from "./tool-contract.js";
 
-export type IndigoWebMcpSurfaceName = "admin" | "public";
-
-export interface IndigoWebMcpContext {
-	readonly surface: IndigoWebMcpSurfaceName;
-	readonly tenantId: string | null;
-	readonly branchId: string | null;
-	readonly route?: string | null;
-	readonly module?: string | null;
-}
+export type IndigoWebMcpContext = WebMcpJsonObject;
 
 export interface IndigoWebMcpCapability {
 	readonly name: string;
 	readonly title?: string;
 	readonly description: string;
-	readonly inputSchema?: WebMcpJsonValue;
-	readonly toolVersion: string;
-	readonly ownerDomain: string;
-	readonly riskLevel: string;
-	readonly requiresConfirmation: boolean;
-	readonly requiresOwner: boolean;
-	readonly requiresLock: boolean;
-	readonly sideEffect: boolean;
-	readonly untrustedContentHint?: boolean;
+	readonly inputSchema?: WebMcpJsonObject;
+	readonly annotations?: WebMcpToolAnnotations;
+	readonly metadata?: WebMcpJsonObject;
 }
 
 export interface IndigoWebMcpProjection {
@@ -44,11 +31,8 @@ export function toWebMcpToolDefinition(
 		...(capability.inputSchema !== undefined
 			? { inputSchema: capability.inputSchema }
 			: {}),
-		annotations: {
-			readOnlyHint: !capability.sideEffect,
-			...(capability.untrustedContentHint !== undefined
-				? { untrustedContentHint: capability.untrustedContentHint }
-				: {}),
-		},
+		...(capability.annotations !== undefined
+			? { annotations: capability.annotations }
+			: {}),
 	};
 }

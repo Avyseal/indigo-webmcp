@@ -1,10 +1,7 @@
 export {
 	createIndigoWebMcpDiscoverySurface,
 	type CreateIndigoWebMcpDiscoverySurfaceOptions,
-	INDIGO_WEBMCP_CONFIRM_TOOL_NAME,
 	INDIGO_WEBMCP_DISCOVERY_TOOL_NAME,
-	type IndigoWebMcpApprovalConfirmer,
-	type IndigoWebMcpApprovalConfirmationRequest,
 	type IndigoWebMcpDiscoveryContext,
 	type IndigoWebMcpDiscoveryStatus,
 	type IndigoWebMcpDiscoverySurface,
@@ -21,7 +18,6 @@ export {
 	type IndigoWebMcpCapability,
 	type IndigoWebMcpContext,
 	type IndigoWebMcpProjection,
-	type IndigoWebMcpSurfaceName,
 	toWebMcpToolDefinition,
 } from "./projection.js";
 export {
@@ -30,6 +26,7 @@ export {
 } from "./projection-parser.js";
 export {
 	type RegisterWebMcpToolSetOptions,
+	type WebMcpJsonObject,
 	type WebMcpJsonPrimitive,
 	type WebMcpJsonValue,
 	WebMcpRegistrationError,

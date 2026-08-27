@@ -14,17 +14,11 @@ function isObjectLike(value: unknown): value is object {
 	);
 }
 
-export function hasWebMcpModelContext(
-	value: unknown,
-): value is WebMcpDocumentLike {
-	if (!isObjectLike(value)) {
-		return false;
-	}
+export function hasWebMcpModelContext(value: unknown): value is WebMcpDocumentLike {
+	if (!isObjectLike(value)) return false;
 
 	const modelContext = Reflect.get(value, "modelContext");
-	if (!isObjectLike(modelContext)) {
-		return false;
-	}
+	if (!isObjectLike(modelContext)) return false;
 
 	return typeof Reflect.get(modelContext, "registerTool") === "function";
 }

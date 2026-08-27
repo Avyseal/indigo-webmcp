@@ -2,7 +2,11 @@ export type WebMcpJsonPrimitive = string | number | boolean | null;
 export type WebMcpJsonValue =
 	| WebMcpJsonPrimitive
 	| readonly WebMcpJsonValue[]
-	| { readonly [key: string]: WebMcpJsonValue };
+	| WebMcpJsonObject;
+
+export interface WebMcpJsonObject {
+	readonly [key: string]: WebMcpJsonValue;
+}
 
 export interface WebMcpToolAnnotations {
 	readonly readOnlyHint?: boolean;
@@ -13,7 +17,7 @@ export interface WebMcpToolDefinition {
 	readonly name: string;
 	readonly title?: string;
 	readonly description: string;
-	readonly inputSchema?: WebMcpJsonValue;
+	readonly inputSchema?: WebMcpJsonObject;
 	readonly annotations?: WebMcpToolAnnotations;
 }
 
@@ -38,7 +42,7 @@ export interface RegisterWebMcpToolSetOptions {
 export interface WebMcpToolSetRegistration {
 	readonly toolNames: readonly string[];
 	readonly signal: AbortSignal;
-	dispose(): void;
+	dispose(reason?: unknown): void;
 }
 
 export type WebMcpRegistrationErrorCode =
@@ -46,6 +50,7 @@ export type WebMcpRegistrationErrorCode =
 	| "webmcp_tool_name_duplicate"
 	| "webmcp_tool_description_required"
 	| "webmcp_tool_schema_not_serializable"
+	| "webmcp_tool_result_not_serializable"
 	| "webmcp_unavailable"
 	| "webmcp_tool_registration_failed";
 
@@ -57,10 +62,7 @@ export class WebMcpRegistrationError extends Error {
 		code: WebMcpRegistrationErrorCode,
 		options: { readonly toolName?: string; readonly cause?: unknown } = {},
 	) {
-		super(
-			code,
-			options.cause === undefined ? undefined : { cause: options.cause },
-		);
+		super(code, options.cause === undefined ? undefined : { cause: options.cause });
 		this.name = "WebMcpRegistrationError";
 		this.code = code;
 		this.toolName = options.toolName ?? null;

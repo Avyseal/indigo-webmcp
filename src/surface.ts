@@ -48,15 +48,12 @@ function combineAbortSignals(
 	lifecycle: AbortSignal,
 ): { readonly signal: AbortSignal; cleanup(): void } {
 	const controller = new AbortController();
-
 	const abortFromPrimary = () => controller.abort(primary.reason);
 	const abortFromLifecycle = () => controller.abort(lifecycle.reason);
 
-	if (primary.aborted) {
-		controller.abort(primary.reason);
-	} else if (lifecycle.aborted) {
-		controller.abort(lifecycle.reason);
-	} else {
+	if (primary.aborted) controller.abort(primary.reason);
+	else if (lifecycle.aborted) controller.abort(lifecycle.reason);
+	else {
 		primary.addEventListener("abort", abortFromPrimary, { once: true });
 		lifecycle.addEventListener("abort", abortFromLifecycle, { once: true });
 	}
@@ -79,17 +76,13 @@ export function createIndigoWebMcpSurface(
 
 	const clear = (reason?: unknown): void => {
 		generation += 1;
-		if (lifecycle !== null && !lifecycle.signal.aborted) {
-			lifecycle.abort(reason);
-		}
+		if (lifecycle !== null && !lifecycle.signal.aborted) lifecycle.abort(reason);
 		lifecycle = null;
 	};
 
 	return {
 		async sync(projection) {
-			if (disposed) {
-				throw new Error("indigo_webmcp_surface_disposed");
-			}
+			if (disposed) throw new Error("indigo_webmcp_surface_disposed");
 
 			clear("projection-replaced");
 			const syncGeneration = generation;
@@ -110,7 +103,9 @@ export function createIndigoWebMcpSurface(
 					execute: async (request) => {
 						const capability = capabilitiesByName.get(request.toolName);
 						if (capability === undefined) {
-							throw new Error(`indigo_webmcp_capability_missing:${request.toolName}`);
+							throw new Error(
+								`indigo_webmcp_capability_missing:${request.toolName}`,
+							);
 						}
 						const combined = combineAbortSignals(
 							request.signal,
@@ -135,7 +130,7 @@ export function createIndigoWebMcpSurface(
 					syncGeneration !== generation ||
 					lifecycle !== nextLifecycle
 				) {
-					registration.dispose();
+					registration.dispose("projection-superseded");
 					return {
 						status: "superseded",
 						revision: projection.revision,
@@ -151,12 +146,22 @@ export function createIndigoWebMcpSurface(
 				};
 			} catch (error) {
 				if (
+					nextLifecycle.signal.aborted &&
+					(disposed ||
+						syncGeneration !== generation ||
+						lifecycle !== nextLifecycle)
+				) {
+					return {
+						status: "superseded",
+						revision: projection.revision,
+						toolNames: [],
+					};
+				}
+				if (
 					error instanceof WebMcpRegistrationError &&
 					error.code === "webmcp_unavailable"
 				) {
-					if (lifecycle === nextLifecycle) {
-						lifecycle = null;
-					}
+					if (lifecycle === nextLifecycle) lifecycle = null;
 					return {
 						status: "unsupported",
 						revision: projection.revision,
@@ -168,9 +173,7 @@ export function createIndigoWebMcpSurface(
 		},
 		clear,
 		dispose(reason) {
-			if (disposed) {
-				return;
-			}
+			if (disposed) return;
 			disposed = true;
 			clear(reason ?? "surface-disposed");
 		},
