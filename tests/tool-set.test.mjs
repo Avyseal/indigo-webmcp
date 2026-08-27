@@ -173,20 +173,45 @@ test("does not register tools when the external lifecycle signal is already abor
 	assert.equal(harness.registrations.length, 0);
 });
 
-test("stops registering later tools when the external lifecycle aborts during registration", async () => {
+test("unregisters completed tools when the external lifecycle signal aborts", async () => {
+	const harness = createDocumentHarness();
 	const lifecycle = new AbortController();
-	const registrations = [];
-	let releaseFirstRegistration;
-	const firstRegistrationPending = new Promise((resolve) => {
-		releaseFirstRegistration = resolve;
+	const registration = await registerWebMcpToolSet({
+		document: harness.document,
+		tools: [readTool],
+		signal: lifecycle.signal,
+		execute: async () => null,
 	});
+
+	const reason = new Error("session-changed");
+	lifecycle.abort(reason);
+
+	assert.equal(harness.registrations.length, 1);
+	assert.equal(harness.registrations[0].options.signal, registration.signal);
+	assert.equal(registration.signal.aborted, true);
+	assert.equal(registration.signal.reason, reason);
+});
+
+test("cancels a pending browser registration and does not register later tools", async () => {
+	const lifecycle = new AbortController();
+	const started = Promise.withResolvers();
+	const registrations = [];
 	const document = {
 		modelContext: {
 			async registerTool(tool, options) {
 				registrations.push({ tool, options });
-				if (registrations.length === 1) {
-					await firstRegistrationPending;
-				}
+				started.resolve();
+				return new Promise((resolve, reject) => {
+					if (options.signal.aborted) {
+						reject(options.signal.reason);
+						return;
+					}
+					options.signal.addEventListener(
+						"abort",
+						() => reject(options.signal.reason),
+						{ once: true },
+					);
+				});
 			},
 		},
 	};
@@ -200,13 +225,13 @@ test("stops registering later tools when the external lifecycle aborts during re
 		execute: async () => null,
 	});
 
-	await Promise.resolve();
-	lifecycle.abort("tenant-changed");
-	releaseFirstRegistration();
+	await started.promise;
+	const reason = new Error("tenant-changed");
+	lifecycle.abort(reason);
 	const registration = await registrationPromise;
 
 	assert.equal(registration.signal.aborted, true);
-	assert.equal(registration.signal.reason, "tenant-changed");
+	assert.equal(registration.signal.reason, reason);
 	assert.equal(registrations.length, 1);
 	assert.equal(registrations[0].options.signal, registration.signal);
 });
