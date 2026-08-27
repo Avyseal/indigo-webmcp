@@ -32,6 +32,7 @@ export interface RegisterWebMcpToolSetOptions {
 	readonly tools: readonly WebMcpToolDefinition[];
 	readonly execute: WebMcpToolExecutor;
 	readonly exposedTo?: readonly string[];
+	readonly signal?: AbortSignal;
 }
 
 export interface WebMcpToolSetRegistration {
