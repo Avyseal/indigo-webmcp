@@ -3,32 +3,35 @@ import {
 	hasWebMcpModelContext,
 } from "../../dist/index.js";
 import { registerNativeStatusTool } from "./native-registration.js";
+import { createLabState } from "./state.js";
 
-const INITIAL_PRODUCTS = [
-	{ id: "espresso", name: "Espresso Beans", stock: 18, reorderLevel: 12 },
-	{ id: "oat-milk", name: "Oat Milk", stock: 6, reorderLevel: 10 },
-	{ id: "cups", name: "12 oz Cups", stock: 42, reorderLevel: 24 },
-	{ id: "vanilla", name: "Vanilla Syrup", stock: 3, reorderLevel: 5 },
-];
+function resolveStorage() {
+	try {
+		return window.localStorage;
+	} catch {
+		return null;
+	}
+}
 
-let products = structuredClone(INITIAL_PRODUCTS);
+const lab = createLabState(resolveStorage());
 let view = "catalog";
 let revision = 0;
 let discoverySurface = null;
 let nativeStatusController = null;
+let removeToolChangeListener = null;
 
 const body = document.querySelector("#inventory-body");
 const webMcpStatus = document.querySelector("#webmcp-status");
+const toolStatus = document.querySelector("#tool-status");
 const viewStatus = document.querySelector("#view-status");
 const eventLog = document.querySelector("#event-log");
 
 function log(message, payload) {
-	const suffix =
-		payload === undefined ? "" : `\n${JSON.stringify(payload, null, 2)}`;
+	const suffix = payload === undefined ? "" : `\n${JSON.stringify(payload, null, 2)}`;
 	eventLog.textContent = `${new Date().toLocaleTimeString()} — ${message}${suffix}`;
 }
 
-function render() {
+function render(products = lab.snapshot()) {
 	body.replaceChildren(
 		...products.map((product) => {
 			const row = document.createElement("tr");
@@ -48,20 +51,9 @@ function render() {
 	});
 }
 
-function searchProducts(query) {
-	const normalized = String(query ?? "")
-		.trim()
-		.toLowerCase();
-	return products.filter(
-		(product) =>
-			!normalized || product.name.toLowerCase().includes(normalized),
-	);
-}
-
 function relevantCapabilities(query) {
 	const intent = String(query ?? "").toLowerCase();
-	const wantsCatalog =
-		view === "catalog" || /search|catalog|product|find/.test(intent);
+	const wantsCatalog = view === "catalog" || /search|catalog|product|find/.test(intent);
 	const wantsInventory =
 		view === "inventory" || /stock|inventory|reorder|restock|low/.test(intent);
 	const capabilities = [];
@@ -86,13 +78,8 @@ function relevantCapabilities(query) {
 			{
 				name: "indigo.lab.inventory.low_stock",
 				title: "List low-stock items",
-				description:
-					"List products whose stock is at or below their reorder level.",
-				inputSchema: {
-					type: "object",
-					properties: {},
-					additionalProperties: false,
-				},
+				description: "List products whose stock is at or below their reorder level.",
+				inputSchema: { type: "object", properties: {}, additionalProperties: false },
 				annotations: { readOnlyHint: true, untrustedContentHint: false },
 				metadata: { domain: "inventory" },
 			},
@@ -124,75 +111,85 @@ async function executeCapability({ capability, input, signal }) {
 
 	switch (capability.name) {
 		case "indigo.lab.catalog.search": {
-			const items = searchProducts(args.query).map(
-				({ id, name, stock, reorderLevel }) => ({
-					id,
-					name,
-					stock,
-					reorderLevel,
-				}),
-			);
-			log("Agent searched the shared catalog", {
-				query: args.query ?? "",
-				count: items.length,
-			});
+			const items = lab.search(args.query);
+			log("Agent searched the shared catalog", { query: args.query ?? "", count: items.length });
 			return { items };
 		}
 		case "indigo.lab.inventory.low_stock": {
-			const items = products.filter(
-				(product) => product.stock <= product.reorderLevel,
-			);
+			const items = lab.lowStock();
 			log("Agent inspected low stock", { count: items.length });
 			return { items };
 		}
 		case "indigo.lab.inventory.restock": {
-			const product = products.find((item) => item.id === args.productId);
-			const quantity = Number(args.quantity);
-			if (!product) throw new Error("lab_product_not_found");
-			if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
-				throw new Error("lab_restock_quantity_invalid");
-			}
-			product.stock += quantity;
-			render();
+			const product = lab.restock(String(args.productId ?? ""), Number(args.quantity));
 			log("Agent restocked shared inventory", {
 				productId: product.id,
-				quantity,
+				quantity: Number(args.quantity),
 				stock: product.stock,
 			});
-			return { product: { ...product } };
+			return { product };
 		}
 		default:
 			throw new Error(`lab_capability_unknown:${capability.name}`);
 	}
 }
 
+async function refreshToolDiagnostics() {
+	const modelContext = document.modelContext;
+	if (!modelContext || typeof modelContext.getTools !== "function") {
+		toolStatus.textContent = "Tool diagnostics unavailable";
+		return;
+	}
+	try {
+		const tools = await modelContext.getTools();
+		const names = tools.map((tool) => tool.name);
+		toolStatus.textContent = `${names.length} tool${names.length === 1 ? "" : "s"} registered`;
+		toolStatus.title = names.join("\n");
+	} catch (error) {
+		toolStatus.textContent = "Tool diagnostics failed";
+		toolStatus.title = error instanceof Error ? error.message : String(error);
+	}
+}
+
 async function initializeWebMcp() {
 	if (!hasWebMcpModelContext(document)) {
 		webMcpStatus.textContent = "WebMCP unavailable — human UI still works";
+		toolStatus.textContent = "0 tools registered";
 		return;
 	}
 
 	nativeStatusController = await registerNativeStatusTool(() => ({
 		view,
-		productCount: products.length,
-		lowStockCount: products.filter(
-			(product) => product.stock <= product.reorderLevel,
-		).length,
+		productCount: lab.snapshot().length,
+		lowStockCount: lab.lowStock().length,
 	}));
 
 	discoverySurface = await createIndigoWebMcpDiscoverySurface({
 		document,
 		getContext: () => ({ view }),
-		loadProjection: async ({ context, input }) => ({
-			revision: `lab-${++revision}`,
-			context,
-			capabilities: relevantCapabilities(input.query),
-		}),
+		loadProjection: async ({ context, input, signal }) => {
+			if (signal.aborted) throw signal.reason;
+			return {
+				revision: `lab-${++revision}`,
+				context,
+				capabilities: relevantCapabilities(input.query),
+			};
+		},
 		execute: executeCapability,
 	});
 	webMcpStatus.textContent = `WebMCP ${discoverySurface.status}`;
+
+	const modelContext = document.modelContext;
+	if (typeof modelContext.addEventListener === "function") {
+		const onToolChange = () => void refreshToolDiagnostics();
+		modelContext.addEventListener("toolchange", onToolChange);
+		removeToolChangeListener = () => modelContext.removeEventListener("toolchange", onToolChange);
+	}
+	await refreshToolDiagnostics();
 	log("WebMCP discovery registered. Ask the agent to discover a capability first.");
 }
+
+lab.subscribe((products) => render(products));
 
 document.addEventListener("click", (event) => {
 	const target = event.target;
@@ -202,15 +199,13 @@ document.addEventListener("click", (event) => {
 		view = target.dataset.view;
 		discoverySurface?.invalidate("lab-view-changed");
 		render();
+		void refreshToolDiagnostics();
 		log("Human changed view", { view });
 		return;
 	}
 
 	if (target.dataset.restock) {
-		const product = products.find((item) => item.id === target.dataset.restock);
-		if (!product) return;
-		product.stock += 5;
-		render();
+		const product = lab.restock(target.dataset.restock, 5);
 		log("Human restocked shared inventory", {
 			productId: product.id,
 			quantity: 5,
@@ -220,13 +215,14 @@ document.addEventListener("click", (event) => {
 });
 
 document.querySelector("#reset").addEventListener("click", () => {
-	products = structuredClone(INITIAL_PRODUCTS);
+	lab.reset();
 	discoverySurface?.invalidate("lab-reset");
-	render();
+	void refreshToolDiagnostics();
 	log("Lab state reset");
 });
 
 window.addEventListener("pagehide", () => {
+	removeToolChangeListener?.();
 	discoverySurface?.dispose("lab-page-hidden");
 	nativeStatusController?.abort("lab-page-hidden");
 });

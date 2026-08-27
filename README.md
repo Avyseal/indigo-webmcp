@@ -1,8 +1,8 @@
 # Indigo WebMCP
 
-Open-source WebMCP interoperability layer for Indigo and a runnable WebMCP reference host.
+Standalone open-source WebMCP interoperability layer and runnable reference host. It can be built, tested, demonstrated, and deployed without the private Indigo repository.
 
-The package turns an already-authorized capability projection into browser-native tools exposed through `document.modelContext.registerTool()`. It deliberately does **not** own authentication, authorization, tenant scope, business logic, confirmations, persistence, or transport.
+The package turns a host-provided capability projection into browser-native tools exposed through `document.modelContext.registerTool()`. Indigo can consume this package later, but this repository has no runtime dependency on Indigo, Avery, private APIs, credentials, tenant data, or private business logic.
 
 ## What is implemented
 
@@ -17,7 +17,8 @@ The package turns an already-authorized capability projection into browser-nativ
 - progressive enhancement when WebMCP is unavailable;
 - optional `exposedTo` forwarding for trusted cross-origin agents;
 - a neutral, public JSON projection wire format;
-- a runnable interoperability lab where humans and agents operate on the same state.
+- a runnable interoperability lab where humans and agents operate on the same persisted browser state;
+- a standalone HTTP host with `/healthz`, WebMCP Permissions Policy, CSP, and host-level integration tests.
 
 ## Architecture boundary
 
@@ -61,11 +62,13 @@ pnpm check
 
 No GitHub Actions are used. `pnpm check` is the local quality gate.
 
-## Run the interoperability lab
+## Run standalone
 
 ```bash
-pnpm demo
+pnpm start
 ```
+
+`pnpm demo` is an equivalent explicit demo command. The standalone server requires no Indigo services, database, credentials, or environment variables.
 
 Open:
 
@@ -80,7 +83,14 @@ The lab exposes one native status tool directly and uses this package for on-dem
 1. invoke `indigo.capabilities.discover` with `{ "query": "find low stock products" }`;
 2. inspect the newly registered contextual tools;
 3. invoke `indigo.lab.inventory.low_stock`;
-4. optionally invoke `indigo.lab.inventory.restock` and observe the same inventory table update for the human.
+4. optionally invoke `indigo.lab.inventory.restock` and observe the same inventory table update for the human;
+5. reload the page and verify that the shared inventory state persists in browser storage.
+
+Health check:
+
+```text
+http://127.0.0.1:4173/healthz
+```
 
 ## Minimal API
 

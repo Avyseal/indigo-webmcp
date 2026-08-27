@@ -5,7 +5,11 @@
 	"type": "module",
 	"license": "MIT",
 	"sideEffects": false,
-	"files": ["dist", "README.md", "LICENSE"],
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
@@ -26,7 +30,8 @@
 		"typecheck": "tsc -p tsconfig.json --noEmit",
 		"check": "biome check . && pnpm typecheck && pnpm test",
 		"demo": "pnpm build && node scripts/serve-example.mjs",
-		"prepack": "pnpm build"
+		"prepack": "pnpm build",
+		"start": "pnpm demo"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.10",

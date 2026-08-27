@@ -64,3 +64,17 @@ Switch between Catalog and Inventory using the human UI. The adapter invalidates
 ### 7. Teardown
 
 Navigate away or close the page. The lab aborts both the direct native registration and the discovery surface, causing the browser to unregister their tools.
+
+
+## Standalone host gate
+
+The Node test suite starts the real HTTP host on an ephemeral port and verifies:
+
+- `/healthz` returns standalone status;
+- the lab HTML, JavaScript, state module, and compiled `dist` bundle are served;
+- the `tools=(self)` Permissions Policy and CSP headers are present;
+- unsupported HTTP methods are rejected;
+- lab mutations persist through a fresh state instance;
+- malformed persisted state falls back to the canonical seed safely.
+
+This gate does not require Indigo or any external service.
