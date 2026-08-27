@@ -32,23 +32,23 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/PRIOR_WORK.md`](do
 
 ## Toolchain
 
-- Node.js 24
-- pnpm 11.18.0
-- TypeScript 6.0.3
-- ESLint 9
-- Prettier 3
+- Node.js 26.8.1
+- pnpm 11.24.0
+- TypeScript 7.0.2
+- Biome 2.5.10
 - Node built-in test runner
 
 ## Local setup
 
 ```bash
+nvm use
 corepack enable
-corepack prepare pnpm@11.18.0 --activate
+corepack prepare pnpm@11.24.0 --activate
 pnpm install
 pnpm check
 ```
 
-`pnpm check` runs formatting validation, linting, strict type checking, tests, and production compilation.
+`pnpm check` runs Biome validation, strict type checking, tests, and production compilation.
 
 ## Development rules
 
@@ -58,6 +58,7 @@ pnpm check
 4. Registration must not execute business operations or wake backend compute.
 5. Side-effecting operations must preserve Indigo's server-side authorization and confirmation policies.
 6. Every behavioral change requires tests.
+7. Do not add GitHub Actions or files under `.github/workflows`.
 
 ## Prior work
 

@@ -1,0 +1,626 @@
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index c7d9d2d..b3c7b9d 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -5,12 +5,13 @@ Contributions must preserve the repository boundary described in `docs/ARCHITECT
+ ## Setup
+ 
+ ```bash
++nvm use
+ corepack enable
+-corepack prepare pnpm@11.18.0 --activate
++corepack prepare pnpm@11.24.0 --activate
+ pnpm install
+ pnpm check
+ ```
+ 
+ ## Requirements
+ 
+-Behavior changes require tests. Do not copy private Indigo source, secrets, tenant data, or internal-only implementation into this repository. Do not weaken server-side authorization by treating WebMCP registration or browser state as trusted authority.
++Behavior changes require tests. Do not copy private Indigo source, secrets, tenant data, or internal-only implementation into this repository. Do not weaken server-side authorization by treating WebMCP registration or browser state as trusted authority. Do not add GitHub Actions or files under `.github/workflows`.
+diff --git a/README.md b/README.md
+index 48e5b3a..b95d058 100644
+--- a/README.md
++++ b/README.md
+@@ -32,23 +32,23 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/PRIOR_WORK.md`](do
+ 
+ ## Toolchain
+ 
+-- Node.js 24
+-- pnpm 11.18.0
+-- TypeScript 6.0.3
+-- ESLint 9
+-- Prettier 3
++- Node.js 26.8.1
++- pnpm 11.24.0
++- TypeScript 7.0.2
++- Biome 2.5.10
+ - Node built-in test runner
+ 
+ ## Local setup
+ 
+ ```bash
++nvm use
+ corepack enable
+-corepack prepare pnpm@11.18.0 --activate
++corepack prepare pnpm@11.24.0 --activate
+ pnpm install
+ pnpm check
+ ```
+ 
+-`pnpm check` runs formatting validation, linting, strict type checking, tests, and production compilation.
++`pnpm check` runs Biome validation, strict type checking, tests, and production compilation.
+ 
+ ## Development rules
+ 
+@@ -58,6 +58,7 @@ pnpm check
+ 4. Registration must not execute business operations or wake backend compute.
+ 5. Side-effecting operations must preserve Indigo's server-side authorization and confirmation policies.
+ 6. Every behavioral change requires tests.
++7. Do not add GitHub Actions or files under `.github/workflows`.
+ 
+ ## Prior work
+ 
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 0c28947..913c88b 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -59,3 +59,20 @@ If a tool becomes invalid because route, tenant, branch, permissions, or session
+ ## Repository boundary
+ 
+ This repository must remain independently understandable, testable, and open source. It must never require disclosure of Indigo's private core to explain how the WebMCP adapter works.
++
++## Browser registration lifecycle
++
++`registerWebMcpToolSet` owns only browser registration. The Indigo host passes an already-authorized tool set plus an execution callback that uses Indigo's existing authenticated transport.
++
++The registration layer:
++
++- validates every tool before the first browser registration;
++- enforces the WebMCP tool-name grammar (`1..128`, ASCII alphanumeric plus `_`, `-`, `.`);
++- registers through `document.modelContext.registerTool()`;
++- owns registrations with one `AbortController` and unregisters them on disposal;
++- rolls back earlier registrations if a later registration fails;
++- forwards the agent-provided execution `AbortSignal` to the host executor;
++- does not make HTTP requests, resolve permissions, or bypass server confirmation policy;
++- treats an empty authorized tool set as a valid no-op for progressive enhancement.
++
++Cross-origin exposure is opt-in through `exposedTo`; same-origin/browser-agent exposure remains the default.
+diff --git a/src/index.ts b/src/index.ts
+index d9bab59..da70ef3 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -4,3 +4,16 @@ export {
+ 	type WebMcpModelContextLike,
+ 	type WebMcpRegisterToolLike,
+ } from "./environment.js";
++export {
++	WebMcpRegistrationError,
++	type RegisterWebMcpToolSetOptions,
++	type WebMcpJsonPrimitive,
++	type WebMcpJsonValue,
++	type WebMcpRegistrationErrorCode,
++	type WebMcpToolAnnotations,
++	type WebMcpToolDefinition,
++	type WebMcpToolExecutionRequest,
++	type WebMcpToolExecutor,
++	type WebMcpToolSetRegistration,
++} from "./tool-contract.js";
++export { registerWebMcpToolSet } from "./tool-set.js";
+diff --git a/src/tool-contract.ts b/src/tool-contract.ts
+new file mode 100644
+index 0000000..4edab97
+--- /dev/null
++++ b/src/tool-contract.ts
+@@ -0,0 +1,67 @@
++export type WebMcpJsonPrimitive = string | number | boolean | null;
++export type WebMcpJsonValue =
++	| WebMcpJsonPrimitive
++	| readonly WebMcpJsonValue[]
++	| { readonly [key: string]: WebMcpJsonValue };
++
++export interface WebMcpToolAnnotations {
++	readonly readOnlyHint?: boolean;
++	readonly untrustedContentHint?: boolean;
++}
++
++export interface WebMcpToolDefinition {
++	readonly name: string;
++	readonly title?: string;
++	readonly description: string;
++	readonly inputSchema?: WebMcpJsonValue;
++	readonly annotations?: WebMcpToolAnnotations;
++}
++
++export interface WebMcpToolExecutionRequest {
++	readonly toolName: string;
++	readonly input: unknown;
++	readonly signal: AbortSignal;
++}
++
++export type WebMcpToolExecutor = (
++	request: WebMcpToolExecutionRequest,
++) => unknown | Promise<unknown>;
++
++export interface RegisterWebMcpToolSetOptions {
++	readonly document: unknown;
++	readonly tools: readonly WebMcpToolDefinition[];
++	readonly execute: WebMcpToolExecutor;
++	readonly exposedTo?: readonly string[];
++}
++
++export interface WebMcpToolSetRegistration {
++	readonly toolNames: readonly string[];
++	readonly signal: AbortSignal;
++	dispose(): void;
++}
++
++export type WebMcpRegistrationErrorCode =
++	| "webmcp_tool_name_invalid"
++	| "webmcp_tool_name_duplicate"
++	| "webmcp_tool_description_required"
++	| "webmcp_tool_schema_not_serializable"
++	| "webmcp_unavailable"
++	| "webmcp_tool_registration_failed";
++
++export class WebMcpRegistrationError extends Error {
++	readonly code: WebMcpRegistrationErrorCode;
++	readonly toolName: string | null;
++
++	constructor(
++		code: WebMcpRegistrationErrorCode,
++		options: { readonly toolName?: string; readonly cause?: unknown } = {},
++	) {
++		super(
++			code,
++			options.cause === undefined ? undefined : { cause: options.cause },
++		);
++		this.name = "WebMcpRegistrationError";
++		this.code = code;
++		this.toolName = options.toolName ?? null;
++	}
++}
+diff --git a/src/tool-set.ts b/src/tool-set.ts
+new file mode 100644
+index 0000000..e271f7e
+--- /dev/null
++++ b/src/tool-set.ts
+@@ -0,0 +1,104 @@
++import { hasWebMcpModelContext } from "./environment.js";
++import {
++	WebMcpRegistrationError,
++	type RegisterWebMcpToolSetOptions,
++	type WebMcpToolSetRegistration,
++} from "./tool-contract.js";
++import { preflightWebMcpTools } from "./tool-validation.js";
++
++function isObjectLike(value: unknown): value is object {
++	return (
++		(typeof value === "object" && value !== null) || typeof value === "function"
++	);
++}
++
++function resolveExecutionSignal(client: unknown): AbortSignal {
++	if (isObjectLike(client)) {
++		const candidate = Reflect.get(client, "signal");
++		if (
++			isObjectLike(candidate) &&
++			typeof Reflect.get(candidate, "aborted") === "boolean" &&
++			typeof Reflect.get(candidate, "addEventListener") === "function"
++		) {
++			return candidate as AbortSignal;
++		}
++	}
++
++	return new AbortController().signal;
++}
++
++function createRegistration(
++	controller: AbortController,
++	toolNames: readonly string[],
++): WebMcpToolSetRegistration {
++	let disposed = false;
++	return {
++		toolNames: Object.freeze([...toolNames]),
++		signal: controller.signal,
++		dispose() {
++			if (disposed) {
++				return;
++			}
++			disposed = true;
++			controller.abort();
++		},
++	};
++}
++
++export async function registerWebMcpToolSet(
++	options: RegisterWebMcpToolSetOptions,
++): Promise<WebMcpToolSetRegistration> {
++	preflightWebMcpTools(options.tools);
++
++	const controller = new AbortController();
++	const toolNames = options.tools.map((tool) => tool.name);
++	const registration = createRegistration(controller, toolNames);
++
++	if (options.tools.length === 0) {
++		return registration;
++	}
++
++	if (!hasWebMcpModelContext(options.document)) {
++		throw new WebMcpRegistrationError("webmcp_unavailable");
++	}
++
++	const registrationOptions = {
++		signal: controller.signal,
++		...(options.exposedTo && options.exposedTo.length > 0
++			? { exposedTo: [...options.exposedTo] }
++			: {}),
++	};
++
++	for (const tool of options.tools) {
++		try {
++			await options.document.modelContext.registerTool(
++				{
++					name: tool.name,
++					...(tool.title !== undefined ? { title: tool.title } : {}),
++					description: tool.description,
++					...(tool.inputSchema !== undefined
++						? { inputSchema: tool.inputSchema }
++						: {}),
++					...(tool.annotations !== undefined
++						? { annotations: { ...tool.annotations } }
++						: {}),
++					execute: async (input: unknown, client?: unknown) =>
++						options.execute({
++							toolName: tool.name,
++							input,
++							signal: resolveExecutionSignal(client),
++						}),
++				},
++				registrationOptions,
++			);
++		} catch (error) {
++			controller.abort(error);
++			throw new WebMcpRegistrationError("webmcp_tool_registration_failed", {
++				toolName: tool.name,
++				cause: error,
++			});
++		}
++	}
++
++	return registration;
++}
+diff --git a/src/tool-validation.ts b/src/tool-validation.ts
+new file mode 100644
+index 0000000..0d04eb2
+--- /dev/null
++++ b/src/tool-validation.ts
+@@ -0,0 +1,56 @@
++import {
++	WebMcpRegistrationError,
++	type WebMcpJsonValue,
++	type WebMcpToolDefinition,
++} from "./tool-contract.js";
++
++const WEBMCP_TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
++
++function assertJsonSerializable(
++	schema: WebMcpJsonValue,
++	toolName: string,
++): void {
++	try {
++		if (JSON.stringify(schema) === undefined) {
++			throw new TypeError("schema_serialized_to_undefined");
++		}
++	} catch (error) {
++		throw new WebMcpRegistrationError(
++			"webmcp_tool_schema_not_serializable",
++			{
++				toolName,
++				cause: error,
++			},
++		);
++	}
++}
++
++export function preflightWebMcpTools(
++	tools: readonly WebMcpToolDefinition[],
++): void {
++	const names = new Set<string>();
++
++	for (const tool of tools) {
++		if (!WEBMCP_TOOL_NAME.test(tool.name)) {
++			throw new WebMcpRegistrationError("webmcp_tool_name_invalid", {
++				toolName: tool.name,
++			});
++		}
++		if (names.has(tool.name)) {
++			throw new WebMcpRegistrationError("webmcp_tool_name_duplicate", {
++				toolName: tool.name,
++			});
++		}
++		names.add(tool.name);
++
++		if (!tool.description.trim()) {
++			throw new WebMcpRegistrationError("webmcp_tool_description_required", {
++				toolName: tool.name,
++			});
++		}
++
++		if (tool.inputSchema !== undefined) {
++			assertJsonSerializable(tool.inputSchema, tool.name);
++		}
++	}
++}
+diff --git a/tests/tool-set.test.mjs b/tests/tool-set.test.mjs
+new file mode 100644
+index 0000000..974afe2
+--- /dev/null
++++ b/tests/tool-set.test.mjs
+@@ -0,0 +1,157 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import {
++	WebMcpRegistrationError,
++	registerWebMcpToolSet,
++} from "../dist/index.js";
++
++function createDocumentHarness({ failOnName } = {}) {
++	const registrations = [];
++	return {
++		document: {
++			modelContext: {
++				async registerTool(tool, options) {
++					if (tool.name === failOnName) {
++						throw new Error(`registration-failed:${tool.name}`);
++					}
++					registrations.push({ tool, options });
++				},
++			},
++		},
++		registrations,
++	};
++}
++
++const readTool = {
++	name: "admin.catalog.search.read",
++	title: "Search catalog",
++	description: "Search the authorized Indigo catalog.",
++	inputSchema: {
++		type: "object",
++		properties: {
++			query: { type: "string" },
++		},
++		additionalProperties: false,
++	},
++	annotations: {
++		readOnlyHint: true,
++		untrustedContentHint: false,
++	},
++};
++
++test("registers a tool with a registration signal and delegates execution", async () => {
++	const harness = createDocumentHarness();
++	const invocations = [];
++	const registration = await registerWebMcpToolSet({
++		document: harness.document,
++		tools: [readTool],
++		execute: async (request) => {
++			invocations.push(request);
++			return { ok: true, tool: request.toolName };
++		},
++	});
++
++	assert.deepEqual(registration.toolNames, ["admin.catalog.search.read"]);
++	assert.equal(harness.registrations.length, 1);
++	const registered = harness.registrations[0];
++	assert.equal(registered.tool.name, readTool.name);
++	assert.equal(registered.tool.title, readTool.title);
++	assert.deepEqual(registered.tool.inputSchema, readTool.inputSchema);
++	assert.deepEqual(registered.tool.annotations, readTool.annotations);
++	assert.equal(registered.options.signal, registration.signal);
++	assert.equal(registration.signal.aborted, false);
++
++	const executionController = new AbortController();
++	const result = await registered.tool.execute(
++		{ query: "coffee" },
++		{ signal: executionController.signal },
++	);
++
++	assert.deepEqual(result, { ok: true, tool: readTool.name });
++	assert.equal(invocations.length, 1);
++	assert.equal(invocations[0].toolName, readTool.name);
++	assert.deepEqual(invocations[0].input, { query: "coffee" });
++	assert.equal(invocations[0].signal, executionController.signal);
++});
++
++test("disposes every registration through the shared AbortSignal", async () => {
++	const harness = createDocumentHarness();
++	const registration = await registerWebMcpToolSet({
++		document: harness.document,
++		tools: [readTool],
++		execute: async () => null,
++	});
++
++	registration.dispose();
++	registration.dispose();
++
++	assert.equal(registration.signal.aborted, true);
++});
++
++test("passes explicit trusted origins to registerTool", async () => {
++	const harness = createDocumentHarness();
++	await registerWebMcpToolSet({
++		document: harness.document,
++		tools: [readTool],
++		exposedTo: ["https://agent.example"],
++		execute: async () => null,
++	});
++
++	assert.deepEqual(harness.registrations[0].options.exposedTo, [
++		"https://agent.example",
++	]);
++});
++
++test("rolls back earlier registrations when a later registration fails", async () => {
++	const failingName = "admin.catalog.product.read";
++	const harness = createDocumentHarness({ failOnName: failingName });
++
++	await assert.rejects(
++		registerWebMcpToolSet({
++			document: harness.document,
++			tools: [
++				readTool,
++				{
++					...readTool,
++					name: failingName,
++					title: "Read product",
++				},
++			],
++			execute: async () => null,
++		}),
++		(error) =>
++			error instanceof WebMcpRegistrationError &&
++			error.code === "webmcp_tool_registration_failed" &&
++			error.toolName === failingName,
++	);
++
++	assert.equal(harness.registrations.length, 1);
++	assert.equal(harness.registrations[0].options.signal.aborted, true);
++});
++
++test("returns an inert registration for an empty authorized tool set", async () => {
++	const registration = await registerWebMcpToolSet({
++		document: {},
++		tools: [],
++		execute: async () => null,
++	});
++
++	assert.deepEqual(registration.toolNames, []);
++	assert.equal(registration.signal.aborted, false);
++	registration.dispose();
++	assert.equal(registration.signal.aborted, true);
++});
++
++test("fails explicitly when tools exist but WebMCP is unavailable", async () => {
++	await assert.rejects(
++		registerWebMcpToolSet({
++			document: {},
++			tools: [readTool],
++			execute: async () => null,
++		}),
++		(error) =>
++			error instanceof WebMcpRegistrationError &&
++			error.code === "webmcp_unavailable",
++	);
++});
+diff --git a/tests/tool-validation.test.mjs b/tests/tool-validation.test.mjs
+new file mode 100644
+index 0000000..b73fbb3
+--- /dev/null
++++ b/tests/tool-validation.test.mjs
+@@ -0,0 +1,103 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import {
++	WebMcpRegistrationError,
++	registerWebMcpToolSet,
++} from "../dist/index.js";
++
++function createDocumentHarness() {
++	const registrations = [];
++	return {
++		document: {
++			modelContext: {
++				async registerTool(tool, options) {
++					registrations.push({ tool, options });
++				},
++			},
++		},
++		registrations,
++	};
++}
++
++const readTool = {
++	name: "admin.catalog.search.read",
++	description: "Search the authorized Indigo catalog.",
++	inputSchema: {
++		type: "object",
++		properties: {
++			query: { type: "string" },
++		},
++		additionalProperties: false,
++	},
++};
++
++test("rejects duplicate names before registering anything", async () => {
++	const harness = createDocumentHarness();
++
++	await assert.rejects(
++		registerWebMcpToolSet({
++			document: harness.document,
++			tools: [readTool, { ...readTool }],
++			execute: async () => null,
++		}),
++		(error) =>
++			error instanceof WebMcpRegistrationError &&
++			error.code === "webmcp_tool_name_duplicate",
++	);
++
++	assert.equal(harness.registrations.length, 0);
++});
++
++test("rejects names outside the WebMCP 1-128 character grammar", async () => {
++	const harness = createDocumentHarness();
++
++	await assert.rejects(
++		registerWebMcpToolSet({
++			document: harness.document,
++			tools: [{ ...readTool, name: "admin catalog search" }],
++			execute: async () => null,
++		}),
++		(error) =>
++			error instanceof WebMcpRegistrationError &&
++			error.code === "webmcp_tool_name_invalid",
++	);
++
++	assert.equal(harness.registrations.length, 0);
++});
++
++test("rejects blank descriptions before registering anything", async () => {
++	const harness = createDocumentHarness();
++
++	await assert.rejects(
++		registerWebMcpToolSet({
++			document: harness.document,
++			tools: [{ ...readTool, description: "   " }],
++			execute: async () => null,
++		}),
++		(error) =>
++			error instanceof WebMcpRegistrationError &&
++			error.code === "webmcp_tool_description_required",
++	);
++
++	assert.equal(harness.registrations.length, 0);
++});
++
++test("rejects non-serializable input schemas before registering anything", async () => {
++	const harness = createDocumentHarness();
++	const circular = {};
++	circular.self = circular;
++
++	await assert.rejects(
++		registerWebMcpToolSet({
++			document: harness.document,
++			tools: [{ ...readTool, inputSchema: circular }],
++			execute: async () => null,
++		}),
++		(error) =>
++			error instanceof WebMcpRegistrationError &&
++			error.code === "webmcp_tool_schema_not_serializable",
++	);
++
++	assert.equal(harness.registrations.length, 0);
++});

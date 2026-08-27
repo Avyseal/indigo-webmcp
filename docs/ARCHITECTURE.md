@@ -59,3 +59,20 @@ If a tool becomes invalid because route, tenant, branch, permissions, or session
 ## Repository boundary
 
 This repository must remain independently understandable, testable, and open source. It must never require disclosure of Indigo's private core to explain how the WebMCP adapter works.
+
+## Browser registration lifecycle
+
+`registerWebMcpToolSet` owns only browser registration. The Indigo host passes an already-authorized tool set plus an execution callback that uses Indigo's existing authenticated transport.
+
+The registration layer:
+
+- validates every tool before the first browser registration;
+- enforces the WebMCP tool-name grammar (`1..128`, ASCII alphanumeric plus `_`, `-`, `.`);
+- registers through `document.modelContext.registerTool()`;
+- owns registrations with one `AbortController` and unregisters them on disposal;
+- rolls back earlier registrations if a later registration fails;
+- forwards the agent-provided execution `AbortSignal` to the host executor;
+- does not make HTTP requests, resolve permissions, or bypass server confirmation policy;
+- treats an empty authorized tool set as a valid no-op for progressive enhancement.
+
+Cross-origin exposure is opt-in through `exposedTo`; same-origin/browser-agent exposure remains the default.
