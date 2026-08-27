@@ -12,9 +12,9 @@ function isObjectLike(value: unknown): value is object {
 	);
 }
 
-function resolveExecutionSignal(client: unknown): AbortSignal {
-	if (isObjectLike(client)) {
-		const candidate = Reflect.get(client, "signal");
+function resolveExecutionSignal(executionOptions: unknown): AbortSignal {
+	if (isObjectLike(executionOptions)) {
+		const candidate = Reflect.get(executionOptions, "signal");
 		if (
 			isObjectLike(candidate) &&
 			typeof Reflect.get(candidate, "aborted") === "boolean" &&
@@ -109,11 +109,11 @@ export async function registerWebMcpToolSet(
 					...(tool.annotations !== undefined
 						? { annotations: { ...tool.annotations } }
 						: {}),
-					execute: async (input: unknown, client?: unknown) =>
+					execute: async (input: unknown, executionOptions?: unknown) =>
 						options.execute({
 							toolName: tool.name,
 							input,
-							signal: resolveExecutionSignal(client),
+							signal: resolveExecutionSignal(executionOptions),
 						}),
 				},
 				registrationOptions,
