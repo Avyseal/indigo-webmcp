@@ -155,3 +155,58 @@ test("fails explicitly when tools exist but WebMCP is unavailable", async () => 
 			error.code === "webmcp_unavailable",
 	);
 });
+
+test("does not register tools when the external lifecycle signal is already aborted", async () => {
+	const harness = createDocumentHarness();
+	const lifecycle = new AbortController();
+	lifecycle.abort("route-changed");
+
+	const registration = await registerWebMcpToolSet({
+		document: harness.document,
+		tools: [readTool],
+		signal: lifecycle.signal,
+		execute: async () => null,
+	});
+
+	assert.equal(registration.signal.aborted, true);
+	assert.equal(registration.signal.reason, "route-changed");
+	assert.equal(harness.registrations.length, 0);
+});
+
+test("stops registering later tools when the external lifecycle aborts during registration", async () => {
+	const lifecycle = new AbortController();
+	const registrations = [];
+	let releaseFirstRegistration;
+	const firstRegistrationPending = new Promise((resolve) => {
+		releaseFirstRegistration = resolve;
+	});
+	const document = {
+		modelContext: {
+			async registerTool(tool, options) {
+				registrations.push({ tool, options });
+				if (registrations.length === 1) {
+					await firstRegistrationPending;
+				}
+			},
+		},
+	};
+	const registrationPromise = registerWebMcpToolSet({
+		document,
+		tools: [
+			readTool,
+			{ ...readTool, name: "admin.catalog.product.read" },
+		],
+		signal: lifecycle.signal,
+		execute: async () => null,
+	});
+
+	await Promise.resolve();
+	lifecycle.abort("tenant-changed");
+	releaseFirstRegistration();
+	const registration = await registrationPromise;
+
+	assert.equal(registration.signal.aborted, true);
+	assert.equal(registration.signal.reason, "tenant-changed");
+	assert.equal(registrations.length, 1);
+	assert.equal(registrations[0].options.signal, registration.signal);
+});
