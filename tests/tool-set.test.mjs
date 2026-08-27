@@ -217,10 +217,7 @@ test("cancels a pending browser registration and does not register later tools",
 	};
 	const registrationPromise = registerWebMcpToolSet({
 		document,
-		tools: [
-			readTool,
-			{ ...readTool, name: "admin.catalog.product.read" },
-		],
+		tools: [readTool, { ...readTool, name: "admin.catalog.product.read" }],
 		signal: lifecycle.signal,
 		execute: async () => null,
 	});
