@@ -1,7 +1,10 @@
 export {
 	createIndigoWebMcpDiscoverySurface,
 	type CreateIndigoWebMcpDiscoverySurfaceOptions,
+	INDIGO_WEBMCP_CONFIRM_TOOL_NAME,
 	INDIGO_WEBMCP_DISCOVERY_TOOL_NAME,
+	type IndigoWebMcpApprovalConfirmer,
+	type IndigoWebMcpApprovalConfirmationRequest,
 	type IndigoWebMcpDiscoveryContext,
 	type IndigoWebMcpDiscoveryStatus,
 	type IndigoWebMcpDiscoverySurface,
