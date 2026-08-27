@@ -22,6 +22,10 @@ export {
 	toWebMcpToolDefinition,
 } from "./projection.js";
 export {
+	IndigoWebMcpProjectionParseError,
+	parseIndigoWebMcpProjection,
+} from "./projection-parser.js";
+export {
 	type RegisterWebMcpToolSetOptions,
 	type WebMcpJsonPrimitive,
 	type WebMcpJsonValue,
