@@ -1,8 +1,11 @@
 # Contributing
 
-Contributions must preserve the repository boundary described in `docs/ARCHITECTURE.md` and `docs/PRIOR_WORK.md`.
+## Requirements
 
-## Setup
+- Node.js 26.8.1
+- pnpm 11.24.0
+
+## Local gate
 
 ```bash
 nvm use
@@ -12,6 +15,13 @@ pnpm install
 pnpm check
 ```
 
-## Requirements
+Run the browser reference host with `pnpm demo`.
 
-Behavior changes require tests. Do not copy private Indigo source, secrets, tenant data, or internal-only implementation into this repository. Do not weaken server-side authorization by treating WebMCP registration or browser state as trusted authority. Do not add GitHub Actions or files under `.github/workflows`.
+## Repository rules
+
+- Keep this repository public and independent of private Indigo source.
+- Do not copy private tools, credentials, tenant data, or authorization logic here.
+- Treat host callbacks as the integration boundary.
+- Keep WebMCP behavior progressive: unsupported browsers must continue to work normally.
+- Add tests for behavioral changes.
+- Do not add GitHub Actions or `.github/workflows`.
