@@ -1,0 +1,38 @@
+{
+	"name": "indigo-webmcp",
+	"version": "0.1.0",
+	"description": "Open-source WebMCP interoperability layer for Indigo.",
+	"type": "module",
+	"license": "MIT",
+	"sideEffects": false,
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"packageManager": "pnpm@11.24.0",
+	"engines": {
+		"node": ">=26.8.1 <27",
+		"pnpm": ">=11.24.0 <12"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"format": "biome format --write .",
+		"format:check": "biome format .",
+		"lint": "biome lint .",
+		"test": "pnpm build && node --test tests/*.test.mjs",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"check": "biome check . && pnpm typecheck && pnpm test",
+		"prepack": "pnpm build"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.10",
+		"typescript": "7.0.2"
+	}
+}
