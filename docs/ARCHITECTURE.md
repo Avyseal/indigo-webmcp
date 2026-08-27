@@ -70,6 +70,7 @@ The registration layer:
 - enforces the WebMCP tool-name grammar (`1..128`, ASCII alphanumeric plus `_`, `-`, `.`);
 - registers through `document.modelContext.registerTool()`;
 - owns registrations with one `AbortController` and unregisters them on disposal;
+- can bind registration ownership to a caller `AbortSignal`, so route/session/context teardown cancels pending registration and unregisters completed tools;
 - rolls back earlier registrations if a later registration fails;
 - forwards the agent-provided execution `AbortSignal` to the host executor;
 - does not make HTTP requests, resolve permissions, or bypass server confirmation policy;
