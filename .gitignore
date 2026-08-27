@@ -26,6 +26,11 @@ yarn-error.log*
 !.vscode/extensions.json
 !.vscode/settings.json
 
+# repository policy
+.github/workflows/
+*.patch
+*:Zone.Identifier
+
 # temporary files
 *.tmp
 *.swp
