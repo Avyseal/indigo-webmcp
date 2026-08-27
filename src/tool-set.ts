@@ -27,6 +27,28 @@ function resolveExecutionSignal(client: unknown): AbortSignal {
 	return new AbortController().signal;
 }
 
+function connectExternalLifecycle(
+	controller: AbortController,
+	externalSignal: AbortSignal | undefined,
+): void {
+	if (!externalSignal) {
+		return;
+	}
+
+	if (externalSignal.aborted) {
+		controller.abort(externalSignal.reason);
+		return;
+	}
+
+	const abortFromExternal = () => controller.abort(externalSignal.reason);
+	externalSignal.addEventListener("abort", abortFromExternal, { once: true });
+	controller.signal.addEventListener(
+		"abort",
+		() => externalSignal.removeEventListener("abort", abortFromExternal),
+		{ once: true },
+	);
+}
+
 function createRegistration(
 	controller: AbortController,
 	toolNames: readonly string[],
@@ -51,10 +73,11 @@ export async function registerWebMcpToolSet(
 	preflightWebMcpTools(options.tools);
 
 	const controller = new AbortController();
+	connectExternalLifecycle(controller, options.signal);
 	const toolNames = options.tools.map((tool) => tool.name);
 	const registration = createRegistration(controller, toolNames);
 
-	if (options.tools.length === 0) {
+	if (options.tools.length === 0 || controller.signal.aborted) {
 		return registration;
 	}
 
@@ -70,6 +93,10 @@ export async function registerWebMcpToolSet(
 	};
 
 	for (const tool of options.tools) {
+		if (controller.signal.aborted) {
+			break;
+		}
+
 		try {
 			await options.document.modelContext.registerTool(
 				{
@@ -92,6 +119,9 @@ export async function registerWebMcpToolSet(
 				registrationOptions,
 			);
 		} catch (error) {
+			if (controller.signal.aborted) {
+				return registration;
+			}
 			controller.abort(error);
 			throw new WebMcpRegistrationError("webmcp_tool_registration_failed", {
 				toolName: tool.name,
