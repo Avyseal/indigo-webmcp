@@ -1,4 +1,14 @@
 export {
+	createIndigoWebMcpDiscoverySurface,
+	type CreateIndigoWebMcpDiscoverySurfaceOptions,
+	INDIGO_WEBMCP_DISCOVERY_TOOL_NAME,
+	type IndigoWebMcpDiscoveryContext,
+	type IndigoWebMcpDiscoveryStatus,
+	type IndigoWebMcpDiscoverySurface,
+	type IndigoWebMcpProjectionLoader,
+	type IndigoWebMcpProjectionLoadRequest,
+} from "./discovery-surface.js";
+export {
 	hasWebMcpModelContext,
 	type WebMcpDocumentLike,
 	type WebMcpModelContextLike,
